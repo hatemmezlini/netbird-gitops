@@ -1,0 +1,20 @@
+{{- $name := include "netbird-gitops.fullname" . -}}
+{{- if .Values.reconciler.enabled }}
+Reconciler: CronJob {{ $name }} ({{ .Values.reconciler.schedule }}){{ if .Values.reconciler.dryRun }}, DRY RUN{{ end }}.
+{{- if .Values.reconciler.dryRun }}
+
+  Nothing is written to NetBird yet. Run it now and read the plan:
+    kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ $name }} {{ $name }}-plan
+    kubectl -n {{ .Release.Namespace }} logs -f job/{{ $name }}-plan
+  Then set reconciler.dryRun=false.
+{{- end }}
+{{- if .Values.config.strict }}
+
+  strict is ON: enabled policies not managed by netbird-gitops will be DISABLED.
+{{- end }}
+{{- end }}
+{{- if .Values.portal.enabled }}
+
+Portal: service {{ $name }}-portal:{{ .Values.portal.service.port }}
+{{- if .Values.portal.address }} (users open https://{{ .Values.portal.address }} through the VPN){{ end }}.
+{{- end }}

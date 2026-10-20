@@ -1,0 +1,73 @@
+# Example: a self-hosted NetBird whose routing peer runs in the cluster and serves the
+# internal tools under *.vpn.example.com. helm install ... -f examples/values.yaml
+netbird:
+  apiUrl: http://netbird-server.netbird.svc.cluster.local
+  tokenSecret:
+    name: netbird-admin-pat
+    key: token
+
+reconciler:
+  dryRun: true
+
+config:
+  strict: true
+  disableAllToAll: true
+  settings:
+    regular_users_view_blocked: true
+    groups_propagation_enabled: true
+    peer_login_expiration_enabled: true
+    peer_login_expiration: 172800
+    extra:
+      user_approval_required: true
+  adminsGroup: platform-admins
+  userGroups: [platform-admins, developers, viewers]
+  # Git owns membership. Remove this block to manage membership in the console.
+  users:
+    alice@example.com: [platform-admins]
+    bob@example.com: [developers]
+    carol@example.com: [viewers]
+  network:
+    name: production
+    description: Production cluster
+    routerGroup: k8s-routers
+  tools:
+    - name: argocd
+      title: Argo CD
+      description: Deployments from Git
+      address: argocd.vpn.example.com
+      icon: git
+      groups: [platform-admins, developers]
+    - name: grafana
+      title: Grafana
+      description: Dashboards and alerting
+      address: grafana.vpn.example.com
+      icon: chart
+      groups: [platform-admins, developers, viewers]
+    - name: logs
+      title: Logs
+      description: Log search
+      address: logs.vpn.example.com
+      icon: search
+      groups: [platform-admins, developers]
+    - name: prometheus
+      title: Prometheus
+      description: Metrics (no authentication)
+      address: prometheus.vpn.example.com
+      icon: activity
+      groups: [platform-admins]
+    - name: alertmanager
+      title: Alertmanager
+      description: Active alerts and silences
+      address: alertmanager.vpn.example.com
+      icon: bell
+      groups: [platform-admins]
+    - name: postgres
+      title: PostgreSQL
+      description: Direct database access
+      address: db.vpn.example.com
+      icon: database
+      ports: [5432]
+      groups: [platform-admins]
+
+portal:
+  address: portal.vpn.example.com

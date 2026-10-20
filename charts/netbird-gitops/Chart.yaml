@@ -1,0 +1,17 @@
+apiVersion: v2
+name: netbird-gitops
+description: Declarative NetBird access control (groups, policies, network resources, users) reconciled from Git, with a static access portal.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/hatemmezlini/netbird-gitops
+sources:
+  - https://github.com/hatemmezlini/netbird-gitops
+keywords:
+  - netbird
+  - wireguard
+  - vpn
+  - gitops
+  - zero-trust
+annotations:
+  artifacthub.io/license: Apache-2.0

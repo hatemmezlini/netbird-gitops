@@ -1,0 +1,108 @@
+{{- if .Values.reconciler.enabled }}
+{{- $name := include "netbird-gitops.fullname" . }}
+{{- $_ := required "netbird.apiUrl is required" .Values.netbird.apiUrl }}
+{{- $_ := required "netbird.tokenSecret.name is required" .Values.netbird.tokenSecret.name }}
+{{- $_ := required "config.network.name is required" .Values.config.network.name }}
+{{- $_ := required "config.network.routerGroup is required" .Values.config.network.routerGroup }}
+{{- if not .Values.config.userGroups }}
+{{- fail "config.userGroups must list at least one group" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  labels:
+    {{- include "netbird-gitops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reconciler
+data:
+  config.json: |
+    {{- include "netbird-gitops.config" . | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "netbird-gitops.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reconciler
+spec:
+  schedule: {{ .Values.reconciler.schedule | quote }}
+  suspend: {{ .Values.reconciler.suspend }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.reconciler.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.reconciler.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ .Values.reconciler.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ .Chart.Name }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: reconciler
+          annotations:
+            checksum/config: {{ include "netbird-gitops.config" . | sha256sum }}
+            {{- with .Values.reconciler.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: reconciler
+              image: {{ include "netbird-gitops.image" (dict "image" .Values.image "defaultTag" .Chart.AppVersion) | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              env:
+                - name: NB_API_URL
+                  value: {{ .Values.netbird.apiUrl | quote }}
+                - name: NB_TOKEN_FILE
+                  value: /var/run/netbird-gitops/token
+                - name: NB_CONFIG
+                  value: /etc/netbird-gitops/config.json
+                - name: NB_DRY_RUN
+                  value: {{ .Values.reconciler.dryRun | quote }}
+              securityContext:
+                {{- include "netbird-gitops.securityContext" . | nindent 16 }}
+              resources:
+                {{- toYaml .Values.reconciler.resources | nindent 16 }}
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/netbird-gitops
+                  readOnly: true
+                - name: token
+                  mountPath: /var/run/netbird-gitops
+                  readOnly: true
+          volumes:
+            - name: config
+              configMap:
+                name: {{ $name }}-config
+            - name: token
+              secret:
+                secretName: {{ .Values.netbird.tokenSecret.name }}
+                items:
+                  - key: {{ .Values.netbird.tokenSecret.key }}
+                    path: token
+          {{- with .Values.reconciler.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.reconciler.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.reconciler.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

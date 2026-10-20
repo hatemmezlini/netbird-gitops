@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: azure/setup-helm@v5
+      - name: Lint
+        run: helm lint charts/netbird-gitops -f examples/values.yaml
+      - name: The rendered configuration is valid
+        run: |
+          pip install --quiet pyyaml
+          helm template nb charts/netbird-gitops -f examples/values.yaml --show-only templates/reconciler.yaml \
+            | python -c 'import sys, yaml; d = next(x for x in yaml.safe_load_all(sys.stdin) if x["kind"] == "ConfigMap"); open("config.json", "w").write(d["data"]["config.json"])'
+          PYTHONPATH=src python -m netbird_gitops --validate --config config.json
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: netbird-gitops:ci
+      - name: Smoke test
+        run: docker run --rm netbird-gitops:ci --version

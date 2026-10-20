@@ -1,0 +1,3 @@
+/* Without JavaScript access cannot be checked: list every tool, hide what needs the script. */
+.card:not(.ok) { display: flex; }
+.search, .skeleton, .copy { display: none; }

@@ -1,7 +1,11 @@
 {{- if .Values.portal.enabled }}
 {{- $name := printf "%s-portal" (include "netbird-gitops.fullname" .) }}
 {{- $html := include "netbird-gitops.portalHtml" . }}
+{{- $css := print (include "netbird-gitops.fontCss" .) (.Files.Get "files/portal.css") }}
 {{- $nginx := include "netbird-gitops.nginxConf" . }}
+{{- if not (has .Values.portal.font (list "inter" "system")) }}
+{{- fail "portal.font must be inter or system" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,9 +17,17 @@ data:
   index.html: |
     {{- $html | nindent 4 }}
   portal.css: |
-    {{- .Files.Get "files/portal.css" | nindent 4 }}
+    {{- $css | nindent 4 }}
+  noscript.css: |
+    {{- .Files.Get "files/noscript.css" | nindent 4 }}
   portal.js: |
     {{- .Files.Get "files/portal.js" | nindent 4 }}
+  {{- if eq .Values.portal.font "inter" }}
+  inter-OFL.txt: |
+    {{- .Files.Get "files/fonts/Inter-OFL.txt" | nindent 4 }}
+binaryData:
+  inter.woff2: {{ .Files.Get "files/fonts/inter-latin-wght-normal.woff2" | b64enc }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -49,7 +61,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: portal
       annotations:
-        checksum/content: {{ print $html $nginx (.Files.Get "files/portal.css") (.Files.Get "files/portal.js") | sha256sum }}
+        checksum/content: {{ print $html $css $nginx (.Files.Get "files/noscript.css") (.Files.Get "files/portal.js") .Values.portal.font | sha256sum }}
         {{- with .Values.portal.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

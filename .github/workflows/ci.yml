@@ -33,7 +33,9 @@ jobs:
           python-version: "3.13"
       - uses: azure/setup-helm@v5
       - name: Lint
-        run: helm lint charts/netbird-gitops -f examples/values.yaml
+        run: |
+          helm lint charts/netbird-gitops -f examples/values.yaml
+          node --check charts/netbird-gitops/files/portal.js
       - name: The rendered configuration is valid
         run: |
           pip install --quiet pyyaml

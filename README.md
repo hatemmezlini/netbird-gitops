@@ -16,8 +16,8 @@ tools:
 - **Reconciler**: a Kubernetes CronJob that makes NetBird match the declaration: groups,
   policies, the network, its resources and router, account settings, and optionally users.
   A change made by hand in the console is reverted at the next run.
-- **Portal**: one HTML page served by nginx. It lists the tools as cards and checks from the
-  browser which ones answer, so users can see what their groups give them.
+- **Portal**: one HTML page served by nginx, with a search bar. It shows each user only the
+  tools their groups let them reach.
 
 The reconciler uses only the Python standard library; the portal is static HTML, CSS and a small
 script. Developed against the NetBird management API v0.79.
@@ -128,6 +128,7 @@ Each tool:
 | `ports` | `[443]` | Ports (ignored for `icmp` and `all`) |
 | `title`, `description` | name, empty | Shown on the card |
 | `url` | `https://<address>` | Link on the card; default only for a plain domain on 443 |
+| `probe` | see [Portal](#portal) | URL the browser requests to check access |
 | `icon` | `globe` | `globe`, `chart`, `activity`, `bell`, `search`, `git`, `database`, `terminal`, `server`, `lock`, `book`, `box` |
 | `portal` | `true` | `false`: access only, no card |
 
@@ -141,23 +142,43 @@ resource reachable by every user group on port 443. Expose the `<release>-portal
 behind whatever serves your internal tools (the routing peer's reverse proxy, or an internal
 Ingress with `portal.ingress`).
 
-**Reachability check.** The page sends a `no-cors` request to each tool URL:
-- If any answer arrives, even an error page, the card shows **Reachable**.
-- If the request times out or fails, the card shows **Not reachable**. Possible reasons: the
-  policy does not allow it, the name does not resolve, or the device is not on the VPN.
+**Only permitted tools are shown.** The page is static and does not know who is looking at it
+(the routing peer masquerades traffic). It does not need to: NetBird enforces access in the
+network, and a policy that does not grant a tool drops its packets. So the browser probes every
+tool from the device, and a card appears only when its tool answers:
 
-The summary is announced to screen readers. Without JavaScript, the cards and links still work.
+| Tool | Probe | Shown when |
+|---|---|---|
+| Web (`url`, or a domain on 443) | `no-cors` request to the URL | any HTTP answer, even an error page |
+| TCP, not web (e.g. `ports: [5432]`) | `https://<address>:<port>/` | any answer before the timeout, even a protocol error |
+| With `probe` | that URL | any HTTP answer |
 
-Design notes:
-- system fonts and no external requests;
-- light and dark themes;
-- status shown by text and icon, never by color alone;
+A blocked tool only ever times out (`portal.checkTimeoutMs`, 4 s by default), so cards appear
+progressively and the last ones settle after the timeout. Browsers refuse some ports (22, 25,
+…); such tools, and `udp`, `icmp`, `all`, wildcard or CIDR tools, need `probe` or
+`portal: false`, and the chart says so when rendering.
+
+The probe proves network access, not a login: the tool still authenticates the user. The tool
+list is in the page source for anyone who can open the portal, so keep titles and descriptions
+free of secrets. Without JavaScript nothing can be checked: every tool is listed.
+
+**Search.** The search bar filters by name, description and address as you type. Press `/` to
+focus it and Escape to clear it; `?q=` in the URL pre-fills it.
+
+**Look.** Inter (bundled, SIL Open Font License) or system fonts (`portal.font`), dark theme by
+default and light theme by system preference. `portal.logo.svg` takes your logo as inline SVG;
+use `fill="currentColor"` for parts that should follow the text color. A third-party logo needs
+its owner's permission. All texts are in `portal.text`, for translation.
+
+Accessibility:
+- labelled search field;
+- one status message for screen readers, updated after typing pauses;
+- visible focus;
 - the whole card is the link target;
-- reduced-motion and forced-colors support;
-- strict Content-Security-Policy.
+- 3:1 contrast for controls and 4.5:1 for text in both themes;
+- reduced-motion and forced-colors support.
 
-The page lists every tool with its groups to anyone who can open it. Do not put anything secret
-in titles or descriptions.
+There are no external requests, and the Content-Security-Policy is strict.
 
 ## Development
 

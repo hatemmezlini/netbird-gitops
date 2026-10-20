@@ -8,7 +8,7 @@ Reconciler: CronJob {{ $name }} ({{ .Values.reconciler.schedule }}){{ if .Values
     kubectl -n {{ .Release.Namespace }} logs -f job/{{ $name }}-plan
   Then set reconciler.dryRun=false.
 {{- end }}
-{{- if .Values.config.strict }}
+{{- if .Values.reconciler.strict }}
 
   strict is ON: enabled policies not managed by netbird-gitops will be DISABLED.
 {{- end }}

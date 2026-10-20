@@ -6,16 +6,19 @@ from netbird_gitops import config
 from netbird_gitops.reconcile import Reconciler
 
 BASE = {
-    "settings": {"regular_users_view_blocked": True, "extra": {"user_approval_required": True}},
-    "adminsGroup": "admins",
-    "userGroups": ["admins", "developers"],
+    "account": {"restrictRegularUsers": True, "userApproval": True},
+    "consoleAdmins": "admins",
+    "access": {
+        "admins": ["grafana", "prometheus"],
+        "developers": ["grafana", "db"],
+    },
+    "resources": {
+        "grafana": {"address": "grafana.vpn.example.com"},
+        "prometheus": {"address": "prometheus.vpn.example.com"},
+        "db": {"address": "10.0.0.5", "ports": [5432]},
+    },
     "network": {"name": "production", "routerGroup": "routers"},
     "portal": {"address": "portal.vpn.example.com"},
-    "tools": [
-        {"name": "grafana", "address": "grafana.vpn.example.com", "groups": ["admins", "developers"]},
-        {"name": "prometheus", "address": "prometheus.vpn.example.com", "groups": ["admins"]},
-        {"name": "db", "address": "10.0.0.5", "ports": [5432], "groups": ["developers"]},
-    ],
 }
 
 
@@ -89,20 +92,24 @@ class ReconcileTest(unittest.TestCase):
     def test_removed_tool_is_cleaned_up(self):
         nb = seeded()
         run(nb, cfg())
-        tools = [t for t in BASE["tools"] if t["name"] != "db"]
-        code, _ = run(nb, cfg(tools=tools))
+        without_db = {
+            "access": {"admins": ["grafana", "prometheus"], "developers": ["grafana"]},
+            "resources": {k: v for k, v in BASE["resources"].items() if k != "db"},
+        }
+        code, _ = run(nb, cfg(**without_db))
         self.assertEqual(code, 0)
         net = nb.by_name(nb.networks, "production")
         self.assertNotIn("db", [r["name"] for r in nb.resources[net["id"]].values()])
         self.assertIsNone(nb.by_name(nb.groups, "gitops-developers-tcp-5432"))
         dev = nb.by_name(nb.policies, "gitops-developers")
         self.assertEqual([r["ports"] for r in dev["rules"]], [["443"]])
-        self.assertEqual(run(nb, cfg(tools=tools)), (0, 0))
+        self.assertEqual(run(nb, cfg(**without_db)), (0, 0))
 
     def test_group_losing_all_access_loses_its_policy(self):
         nb = seeded()
         run(nb, cfg())
-        conf = cfg(portal={}, tools=[t for t in BASE["tools"] if t["name"] == "prometheus"])
+        conf = cfg(portal={}, access={"admins": ["prometheus"], "developers": []},
+                   resources={"prometheus": BASE["resources"]["prometheus"]})
         run(nb, conf)
         self.assertIsNone(nb.by_name(nb.policies, "gitops-developers"))
         self.assertIsNone(nb.by_name(nb.groups, "gitops-developers-tcp-443"))
@@ -117,7 +124,7 @@ class ReconcileTest(unittest.TestCase):
         bob = nb.add_user("bob@example.com", role="admin", groups=["admins"])
         owner = nb.add_user("owner@example.com", role="owner", groups=["admins"])
         bot = nb.add_user("", role="admin", service=True)
-        conf = cfg(users={"alice@example.com": ["admins"], "owner@example.com": ["admins"],
+        conf = cfg(members={"alice@example.com": ["admins"], "owner@example.com": ["admins"],
                           "carol@example.com": ["developers"]})
         run(nb, conf)
         self.assertFalse(nb.users[alice]["pending_approval"])
@@ -149,8 +156,8 @@ class ReconcileTest(unittest.TestCase):
         nb.add_group("developers")
         adm = nb.add_user("adm@example.com", role="admin", groups=["developers"])
         raw = copy.deepcopy(BASE)
-        del raw["adminsGroup"]
-        conf = config.normalize({**raw, "users": {"adm@example.com": ["developers"]}})
+        del raw["consoleAdmins"]
+        conf = config.normalize({**raw, "members": {"adm@example.com": ["developers"]}})
         run(nb, conf)
         self.assertEqual(nb.users[adm]["role"], "admin")
         self.assertEqual(run(nb, conf), (0, 0))

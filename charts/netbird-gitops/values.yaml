@@ -1,13 +1,61 @@
-# -- Reconciler image.
-image:
-  repository: ghcr.io/hatemmezlini/netbird-gitops
-  # Defaults to the chart appVersion.
-  tag: ""
-  # Optional, e.g. sha256:...; takes precedence over the tag.
-  digest: ""
-  pullPolicy: IfNotPresent
+# yaml-language-server: $schema=values.schema.json
+#
+# The first four sections describe access and are what you edit most. They can live in a
+# file of their own (helm ... -f values.yaml -f access.yaml). Unknown keys are rejected.
 
-imagePullSecrets: []
+# -- Who can reach what. Keys are groups of people (created in NetBird if missing, never
+# deleted); values are resource names, or ["*"] for every resource. Every group listed
+# here can also open the portal.
+access: {}
+#  platform-admins: ["*"]
+#  developers: [argocd, grafana]
+#  viewers: [grafana]
+
+# -- What can be reached. Keys are resource names (lowercase letters, digits, dashes).
+resources: {}
+#  grafana:
+#    address: grafana.vpn.example.com   # domain, *.domain, IP or CIDR
+#    title: Grafana                     # portal card; default: the name
+#    description: Dashboards and alerting
+#    icon: chart                        # see README.md for the list
+#    protocol: tcp                      # tcp (default), udp, icmp, all
+#    ports: [443]                       # default [443]; none for icmp and all
+#    url: https://grafana.vpn.example.com/   # card link; default https://<address> on 443
+#    probe: https://grafana.vpn.example.com/api/health   # URL the portal checks; optional
+#    showInPortal: true                 # false: access only, no card
+
+# -- Who is in which group. Leave null to manage membership in the NetBird console.
+# When set, Git owns membership of the groups in `access`: listed people get exactly their
+# groups (and are approved if pending); in strict mode, people not listed lose them.
+members: null
+#  alice@example.com: [platform-admins]
+#  bob@example.com: [developers]
+
+# -- Group whose members get the NetBird console role "admin"; members of the other
+# groups get "user". Empty: console roles are not managed.
+consoleAdmins: ""
+
+# -- NetBird account settings. Unset values are left as they are.
+account:
+  # Changes of a person's groups reach the devices they already enrolled. The access model
+  # relies on it.
+  groupsPropagation: true
+  # restrictRegularUsers: true      # regular users only see their own devices in the console
+  # userApproval: true              # a new account needs approval (approved here if in members)
+  # peerApproval: false
+  # peerLoginExpiration: 48h        # duration (s, m, h, d) or false
+  # peerInactivityExpiration: false
+  # Any other AccountSettings field, with its NetBird API name.
+  raw: {}
+
+# -- The NetBird network that holds the resources, and its routing peers.
+network:
+  name: ""
+  description: ""
+  # Group of the routing peers, usually the auto-assigned group of their setup key.
+  routerGroup: ""
+  masquerade: true
+  metric: 9999
 
 netbird:
   # Management API base URL, as reached from the cluster (without /api), e.g.
@@ -23,6 +71,15 @@ reconciler:
   schedule: "*/5 * * * *"
   # true: the job only prints its plan (kubectl logs). Read it once, then set false.
   dryRun: true
+  # Disable every enabled policy not managed here (disabled, never deleted), and delete
+  # managed objects that are no longer declared.
+  strict: true
+  # Disable All -> All policies (NetBird's "Default" policy connects every device).
+  disableAllToAll: true
+  # Approve people listed in `members` who are pending approval.
+  approveMembers: true
+  # Fail the job when no routing peer is connected.
+  checkRouterOnline: true
   suspend: false
   activeDeadlineSeconds: 240
   successfulJobsHistoryLimit: 1
@@ -35,56 +92,20 @@ reconciler:
   tolerations: []
   affinity: {}
 
-# -- Desired NetBird state. Reference: README.md "Configuration".
-config:
-  # Disable every enabled policy not managed here (they are disabled, never deleted), and
-  # delete managed objects that are no longer declared.
-  strict: true
-  # Disable any All -> All policy (NetBird's "Default" policy connects every peer).
-  disableAllToAll: true
-  # Partial account settings, merged into the current ones (NetBird AccountSettings).
-  settings: {}
-  #   regular_users_view_blocked: true
-  #   groups_propagation_enabled: true
-  #   extra:
-  #     user_approval_required: true
-  # Members of this group get the console role `admin`, other user groups `user`.
-  adminsGroup: ""
-  # Groups of people. Created if missing, never deleted. Every group listed here can
-  # open the portal.
-  userGroups: []
-  # null: group membership is managed in the NetBird console.
-  # A map: Git owns membership of userGroups (e-mail -> groups). In strict mode, users not
-  # listed lose their user groups. Listed users pending approval are approved.
-  users: null
-  approveListedUsers: true
-  # The network whose routing peer serves the tools. The router group is usually the
-  # auto-group of the routing peer's setup key.
-  network:
-    name: ""
-    description: ""
-    routerGroup: ""
-    masquerade: true
-    metric: 9999
-  # Exit with an error (failed Job) when no routing peer is connected.
-  checkRouterOnline: true
-  # Each tool: a network resource, reachable by its groups on its ports, and a portal card.
-  tools: []
-  # - name: grafana                      # lowercase, digits, dashes
-  #   title: Grafana
-  #   description: Dashboards and alerting
-  #   address: grafana.vpn.example.com   # domain, *.domain, IP or CIDR
-  #   url: https://grafana.vpn.example.com  # default: https://<address> for a domain on 443
-  #   icon: chart                         # see README.md for the list
-  #   groups: [platform-admins, developers]
-  #   protocol: tcp                       # tcp, udp, icmp, all
-  #   ports: [443]
-  #   portal: true                        # false: access only, no card
+image:
+  repository: ghcr.io/hatemmezlini/netbird-gitops
+  # Defaults to the chart appVersion.
+  tag: ""
+  # Optional, e.g. sha256:...; takes precedence over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
 
 portal:
   enabled: true
-  # Host name users open through the VPN. It becomes a network resource reachable by every
-  # user group on port 443. Leave empty to manage access to the portal yourself.
+  # Host name people open through the VPN. It becomes a resource reachable by every group
+  # in `access`, on port 443. Leave empty to manage access to the portal yourself.
   address: ""
   title: Internal tools
   subtitle: The tools your groups give you access to through NetBird, from this device.
@@ -96,9 +117,9 @@ portal:
     alt: ""
   # inter: Inter, bundled with the chart (no external request). system: system fonts.
   font: inter
-  # The page probes every tool from the browser and only shows those that answer.
-  # A tool not permitted by the user's groups times out: keep it above the latency of
-  # a permitted one.
+  # The page checks every resource from the browser and only shows those that answer.
+  # A resource the person's groups do not grant times out: keep this above the latency
+  # of a granted one.
   checkTimeoutMs: 4000
   text:
     searchLabel: Search tools

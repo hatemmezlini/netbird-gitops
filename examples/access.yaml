@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/hatemmezlini/netbird-gitops/v0.1.0/charts/netbird-gitops/values.schema.json
+#
+# Who can reach what. Deployed with: helm ... -f values.yaml -f access.yaml
+
+# Each group lists the resources it can reach; "*" means all of them.
+access:
+  platform-admins: ["*"]
+  developers: [argocd, grafana, logs]
+  viewers: [grafana]
+
+# What can be reached: tcp/443 unless ports or protocol say otherwise.
+resources:
+  argocd:
+    address: argocd.vpn.example.com
+    title: Argo CD
+    description: Deployments from Git
+    icon: git
+  grafana:
+    address: grafana.vpn.example.com
+    title: Grafana
+    description: Dashboards and alerting
+    icon: chart
+  logs:
+    address: logs.vpn.example.com
+    title: Logs
+    description: Log search
+    icon: search
+  prometheus:
+    address: prometheus.vpn.example.com
+    title: Prometheus
+    description: Metrics (no authentication)
+    icon: activity
+  alertmanager:
+    address: alertmanager.vpn.example.com
+    title: Alertmanager
+    description: Active alerts and silences
+    icon: bell
+  postgres:
+    address: db.vpn.example.com
+    ports: [5432]
+    title: PostgreSQL
+    description: Direct database access
+    icon: database
+
+# Who is in which group. Remove this block to manage membership in the NetBird console.
+members:
+  alice@example.com: [platform-admins]
+  bob@example.com: [developers]
+  carol@example.com: [viewers]
+
+# Members of this group are admins of the NetBird console; the others are users.
+consoleAdmins: platform-admins

@@ -36,7 +36,7 @@ def main(argv=None):
         _log(f"ERROR: configuration: {exc}")
         return 2
     if args.validate:
-        _log(f"configuration OK: {len(cfg['tools'])} tool(s), {len(cfg['userGroups'])} user group(s)")
+        _log(f"configuration OK: {len(cfg['resources'])} resource(s), {len(cfg['userGroups'])} group(s)")
         return 0
 
     url = os.environ.get("NB_API_URL")

@@ -4,8 +4,8 @@
 {{- $toolIcons := include "netbird-gitops.toolIcons" . | fromYaml -}}
 {{- $icons := merge (dict) $toolIcons (include "netbird-gitops.uiIcons" . | fromYaml) -}}
 {{- $tools := list -}}
-{{- range .Values.config.tools -}}
-{{- if or (not (hasKey . "portal")) .portal -}}
+{{- range (include "netbird-gitops.resourceList" . | fromJsonArray) -}}
+{{- if or (not (hasKey . "showInPortal")) .showInPortal -}}
 {{- $tools = append $tools . -}}
 {{- end -}}
 {{- end -}}

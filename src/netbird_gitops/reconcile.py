@@ -95,9 +95,9 @@ class Reconciler:
     def access(self):
         """{(group, protocol, ports): [resource names]} for every granted access."""
         acc = {}
-        for tool in self.cfg["tools"]:
-            for g in tool["groups"]:
-                acc.setdefault((g, tool["protocol"], tuple(tool["ports"])), []).append(tool["name"])
+        for res in self.cfg["resources"]:
+            for g in res["groups"]:
+                acc.setdefault((g, res["protocol"], tuple(res["ports"])), []).append(res["name"])
         portal = self.cfg["portal"]
         if portal:
             for g in self.cfg["userGroups"]:
@@ -107,8 +107,8 @@ class Reconciler:
     def resources(self, access):
         """Desired network resources: {name: {address, description, groups}}."""
         wanted = {}
-        for tool in self.cfg["tools"]:
-            wanted[tool["name"]] = {"address": tool["address"], "description": tool["title"]}
+        for res in self.cfg["resources"]:
+            wanted[res["name"]] = {"address": res["address"], "description": res["title"]}
         if self.cfg["portal"]:
             wanted["portal"] = {"address": self.cfg["portal"]["address"], "description": "Access portal"}
         for res in wanted.values():
@@ -255,18 +255,18 @@ class Reconciler:
     def users(self):
         cfg = self.cfg
         user_gids = {self.groups[g]: g for g in cfg["userGroups"]}
-        admins = cfg["adminsGroup"]
-        listed = cfg["users"]
+        admins = cfg["consoleAdmins"]
+        members = cfg["members"]
         found = set()
         for u in self.api.get("/users"):
             if u.get("is_service_user"):
                 continue
             email = (u.get("email") or "").lower()
             current = set(u.get("auto_groups") or [])
-            if listed is not None:
+            if members is not None:
                 found.add(email)
-                if email in listed:
-                    names = listed[email]
+                if email in members:
+                    names = members[email]
                 elif cfg["strict"]:
                     names = []
                 else:
@@ -275,14 +275,14 @@ class Reconciler:
             else:
                 names = [user_gids[g] for g in current if g in user_gids]
                 target = current
-            if listed is not None and email in listed and u.get("pending_approval"):
-                if cfg["approveListedUsers"]:
+            if members is not None and email in members and u.get("pending_approval"):
+                if cfg["approveMembers"]:
                     self.api.write("POST", f"/users/{u['id']}/approve", None, f"approve user {email}")
                 else:
-                    self.warn(f"user {email} is listed but pending approval")
+                    self.warn(f"user {email} is in members but pending approval (approveMembers is off)")
             role = u.get("role")
             # Console roles are managed only when an admins group is declared.
-            if admins and role in MANAGED_ROLES and (names or listed is not None):
+            if admins and role in MANAGED_ROLES and (names or members is not None):
                 role = "admin" if admins in names else "user"
             if role != u.get("role") or target != current:
                 parts = []
@@ -295,16 +295,16 @@ class Reconciler:
                 self.api.write("PUT", f"/users/{u['id']}",
                                {"role": role, "auto_groups": sorted(target), "is_blocked": bool(u.get("is_blocked"))},
                                f"update user {email}: {' '.join(parts)}")
-            elif listed is None and not names and role in MANAGED_ROLES:
+            elif members is None and not names and role in MANAGED_ROLES:
                 self.warn(f"user {email} is in no user group (left as is)")
-        for email in sorted(set(listed or {}) - found):
+        for email in sorted(set(members or {}) - found):
             self.log(f"user {email} has not signed up yet")
 
     def router_online(self):
         rid = self.groups[self.cfg["network"]["routerGroup"]]
         peers = [p for p in self.api.get("/peers") if rid in _ids(p.get("groups"))]
         if not peers:
-            self.error(f"no peer in router group {self.cfg['network']['routerGroup']}: tools are unreachable")
+            self.error(f"no peer in router group {self.cfg['network']['routerGroup']}: resources are unreachable")
         elif not any(p.get("connected") for p in peers):
             self.error(f"router peer(s) offline: {', '.join(sorted(p['name'] for p in peers))}")
 

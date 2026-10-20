@@ -34,14 +34,23 @@ jobs:
       - uses: azure/setup-helm@v5
       - name: Lint
         run: |
-          helm lint charts/netbird-gitops -f examples/values.yaml
+          helm lint charts/netbird-gitops -f examples/values.yaml -f examples/access.yaml
           node --check charts/netbird-gitops/files/portal.js
       - name: The rendered configuration is valid
         run: |
           pip install --quiet pyyaml
-          helm template nb charts/netbird-gitops -f examples/values.yaml --show-only templates/reconciler.yaml \
+          helm template nb charts/netbird-gitops -f examples/values.yaml -f examples/access.yaml --show-only templates/reconciler.yaml \
             | python -c 'import sys, yaml; d = next(x for x in yaml.safe_load_all(sys.stdin) if x["kind"] == "ConfigMap"); open("config.json", "w").write(d["data"]["config.json"])'
           PYTHONPATH=src python -m netbird_gitops --validate --config config.json
+      - name: Mistakes are rejected at install time
+        run: |
+          printf 'resources:\n  postgres:\n    address: db.vpn.example.com\n    port: 5432\n' > typo.yaml
+          printf 'access:\n  developers: [argocd, grafna]\n' > unknown.yaml
+          for f in typo.yaml unknown.yaml; do
+            if helm template nb charts/netbird-gitops -f examples/values.yaml -f examples/access.yaml -f "$f" > /dev/null 2>&1; then
+              echo "$f was accepted"; exit 1
+            fi
+          done
 
   image:
     runs-on: ubuntu-latest

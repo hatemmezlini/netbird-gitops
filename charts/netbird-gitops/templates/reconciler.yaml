@@ -2,11 +2,9 @@
 {{- $name := include "netbird-gitops.fullname" . }}
 {{- $_ := required "netbird.apiUrl is required" .Values.netbird.apiUrl }}
 {{- $_ := required "netbird.tokenSecret.name is required" .Values.netbird.tokenSecret.name }}
-{{- $_ := required "config.network.name is required" .Values.config.network.name }}
-{{- $_ := required "config.network.routerGroup is required" .Values.config.network.routerGroup }}
-{{- if not .Values.config.userGroups }}
-{{- fail "config.userGroups must list at least one group" }}
-{{- end }}
+{{- $_ := required "network.name is required" .Values.network.name }}
+{{- $_ := required "network.routerGroup is required" .Values.network.routerGroup }}
+{{- include "netbird-gitops.validate" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

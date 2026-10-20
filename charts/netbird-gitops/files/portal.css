@@ -187,7 +187,7 @@ code { font-family: var(--mono); font-size: 1em; }
 .skeleton .lines span:first-child { width: 45%; }
 .skeleton .lines span:last-child { width: 80%; }
 .skeleton .tile, .skeleton .lines span { animation: pulse 1.4s ease-in-out infinite; }
-.grid:not([aria-busy="true"]) .skeleton { display: none; }
+.grid:not([aria-busy="true"]) .skeleton, .grid.has-results .skeleton { display: none; }
 
 /* Empty and no-match states */
 .state { margin: var(--space-6) auto 0; max-width: 28rem; text-align: center; padding: var(--space-8) var(--space-4); }

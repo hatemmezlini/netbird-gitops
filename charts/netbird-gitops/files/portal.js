@@ -15,11 +15,15 @@
   const recheck = $("#recheck");
   const noMatch = $("#no-match");
   const none = $("#none");
+  // Re-checks when the tab is shown again are spaced by at least this much.
+  const recheckAfter = 30000;
   let checking = false;
+  let announceChecking = true;
+  let lastCheck = 0;
   let run = 0;
   let summaryTimer;
 
-  const fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const fold = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   const fill = (template, values) => template.replace(/\{(\w+)\}/g, (_, k) => values[k] ?? "");
   cards.forEach((card) => { card.dataset.search = fold(card.dataset.search); });
 
@@ -29,7 +33,8 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
-      await fetch(card.dataset.probe, { mode: "no-cors", cache: "no-store", credentials: "omit", signal: controller.signal });
+      // HEAD: no body is downloaded; any answer, even 405, still proves access.
+      await fetch(card.dataset.probe, { method: "HEAD", mode: "no-cors", cache: "no-store", credentials: "omit", signal: controller.signal });
       return true;
     } catch {
       return card.dataset.mode === "tcp" && !controller.signal.aborted;
@@ -39,7 +44,7 @@
   };
 
   const describe = (available, shown, query) => {
-    if (checking) return text.textChecking;
+    if (checking && announceChecking) return text.textChecking;
     if (!available) return fill(text.textAvailable, { count: 0 });
     if (query) return fill(text.textMatching, { shown, count: available });
     return available === 1 ? text.textAvailableOne : fill(text.textAvailable, { count: available });
@@ -61,28 +66,37 @@
     $("#no-match-query").textContent = input.value.trim();
     noMatch.hidden = !(query && available && !shown);
     none.hidden = checking || available > 0;
+    list.classList.toggle("has-results", available > 0);
     clearTimeout(summaryTimer);
-    const update = () => { summary.textContent = describe(available, shown, query); };
+    // Rewriting an unchanged message would make screen readers announce it again.
+    const update = () => {
+      const message = describe(available, shown, query);
+      if (summary.textContent !== message) summary.textContent = message;
+    };
     if (quiet) summaryTimer = setTimeout(update, 500);
     else update();
   };
 
-  const check = async () => {
+  // Cards are updated in place as answers arrive: a re-check never blanks the list, a
+  // tool that became reachable appears, one that no longer is disappears.
+  // `manual`: the user asked, so "Checking…" is announced; automatic re-checks stay quiet.
+  const check = async (manual = true) => {
     const current = ++run;
     checking = true;
+    announceChecking = manual;
     recheck.disabled = true;
     list.setAttribute("aria-busy", "true");
-    cards.forEach((card) => card.classList.remove("ok"));
     render();
     await Promise.all(cards.map(async (card) => {
       const ok = await probe(card);
-      if (ok && current === run) {
-        card.classList.add("ok");
+      if (current === run) {
+        card.classList.toggle("ok", ok);
         render(true);
       }
     }));
     if (current !== run) return;
     checking = false;
+    lastCheck = Date.now();
     recheck.disabled = false;
     list.removeAttribute("aria-busy");
     render();
@@ -142,8 +156,15 @@
     });
   });
 
+  // No polling: re-check when what a user can reach may have changed, i.e. when they come
+  // back to the tab (VPN reconnected, group added) or when the network comes back.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && !checking && Date.now() - lastCheck > recheckAfter) check(false);
+  });
+  window.addEventListener("online", () => { if (!checking) check(false); });
+
   recheck.hidden = false;
-  recheck.addEventListener("click", check);
-  $("#retry").addEventListener("click", check);
+  recheck.addEventListener("click", () => check());
+  $("#retry").addEventListener("click", () => check());
   check();
 })();

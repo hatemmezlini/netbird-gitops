@@ -22,7 +22,140 @@ tools:
 The reconciler uses only the Python standard library; the portal is static HTML, CSS and a small
 script. Developed against the NetBird management API v0.79.
 
-## How access is modelled
+## Requirements
+
+- A Kubernetes cluster and `kubectl` configured for it.
+- **Helm 3.8 or later** (Helm 4 works), for charts stored in OCI registries. Install it with
+  your package manager, or see [helm.sh/docs/intro/install](https://helm.sh/docs/intro/install/):
+
+  ```sh
+  brew install helm                 # macOS
+  winget install Helm.Helm          # Windows
+  sudo snap install helm --classic  # Ubuntu
+  helm version                      # check
+  ```
+
+- A self-hosted NetBird (developed and tested against management API v0.79) with a **routing peer**: the NetBird
+  peer that forwards VPN traffic to your tools (often a pod in the cluster). Its setup key must
+  auto-assign a group, for example `k8s-routers`: that group is `network.routerGroup`.
+- An **admin service user** with a personal access token (PAT), for the reconciler.
+
+## Install
+
+**1. Create the token.** In the NetBird console:
+   1. Open Team → Service Users, and create a service user with the Admin role.
+   2. Create a token for it.
+
+Then store the token in the namespace where you install the chart:
+
+```sh
+kubectl create namespace netbird   # if needed
+kubectl -n netbird create secret generic netbird-admin-pat --from-literal=token=<PAT>
+```
+
+**2. Write your values.** Copy [examples/values.yaml](examples/values.yaml), or start from this
+minimum. `helm show values oci://ghcr.io/hatemmezlini/charts/netbird-gitops` lists every option.
+
+```yaml
+netbird:
+  apiUrl: http://netbird-server.netbird.svc.cluster.local   # management API, from the cluster
+  tokenSecret: { name: netbird-admin-pat, key: token }
+config:
+  adminsGroup: platform-admins
+  userGroups: [platform-admins, developers]
+  network: { name: production, routerGroup: k8s-routers }
+  settings:
+    groups_propagation_enabled: true   # group changes reach devices already enrolled
+  tools:
+    - name: grafana
+      title: Grafana
+      address: grafana.vpn.example.com
+      groups: [platform-admins, developers]
+portal:
+  address: portal.vpn.example.com
+```
+
+**3. Install.** The chart starts in **dry run**: nothing is written to NetBird.
+
+```sh
+helm install netbird-gitops oci://ghcr.io/hatemmezlini/charts/netbird-gitops \
+  --version 0.2.1 -n netbird -f values.yaml
+```
+
+**4. Read the plan.** Run the job once instead of waiting for the schedule:
+
+```sh
+kubectl -n netbird create job --from=cronjob/netbird-gitops netbird-gitops-plan
+kubectl -n netbird logs -f job/netbird-gitops-plan
+```
+
+Each `[plan]` line is a change it would make, for example `create policy gitops-developers` or
+`disable policy Default: All -> All`. In strict mode (the default), every policy you created by
+hand appears as `disable`: declare what you still need before going further.
+
+**5. Apply.** Set `reconciler.dryRun: false` in your values, then:
+
+```sh
+helm upgrade netbird-gitops oci://ghcr.io/hatemmezlini/charts/netbird-gitops \
+  --version 0.2.1 -n netbird -f values.yaml
+```
+
+From then on the CronJob runs every 5 minutes. To change access, edit the values and run the same
+`helm upgrade`, or let your GitOps tool deploy it. `kubectl -n netbird get jobs` shows the runs.
+A failed job means one of three things: an API error, a deletion that could not be applied, or
+no routing peer connected. `kubectl logs` tells which.
+
+**6. Publish the portal.** Point `portal.address` at the `netbird-gitops-portal` Service (port
+80), through whatever serves your internal tools behind the routing peer. Every user group can
+reach the portal; the reconciler grants that.
+
+`helm uninstall` removes the CronJob and the portal, but not what was created in NetBird.
+
+Run the reconciler outside Kubernetes (the configuration is the `config` block as JSON):
+
+```sh
+pip install .
+NB_API_URL=https://netbird.example.com NB_TOKEN_FILE=./pat \
+  netbird-gitops --config config.json --dry-run
+```
+
+## Who can reach what
+
+A person reaches a tool only when all three hold:
+
+1. **They are in one of the tool's `groups`.** Membership comes from `users` in Git when
+   declared, otherwise from the NetBird console (Team → Users).
+2. **They use a device enrolled with their own login.** NetBird gives their groups to that
+   device. A device enrolled with a setup key only gets that key's groups.
+3. **The traffic uses the tool's protocol and ports.** Other ports of the same address stay
+   closed.
+
+Nothing else is open:
+- All -> All policies are disabled.
+- Rules are one-way, so devices of different people never reach each other.
+- Every user group can open the portal.
+
+With [examples/values.yaml](examples/values.yaml):
+
+| Tool | Port | platform-admins | developers | viewers |
+|---|---|---|---|---|
+| argocd | tcp/443 | yes | yes | — |
+| grafana | tcp/443 | yes | yes | yes |
+| logs | tcp/443 | yes | yes | — |
+| prometheus | tcp/443 | yes | — | — |
+| alertmanager | tcp/443 | yes | — | — |
+| postgres | tcp/5432 | yes | — | — |
+| portal | tcp/443 | yes | yes | yes |
+
+So `bob@example.com`, listed in `developers`, reaches Argo CD, Grafana, Logs and the portal, and
+nothing else. To check access at each stage:
+- **Before applying:** read the dry-run plan.
+- **In the NetBird console:**
+  - Access Control → Policies shows one `gitops-<group>` policy per group.
+  - Networks → `<network.name>` shows the resources and their groups.
+- **From a person's device:** the portal lists exactly the tools that device can reach.
+
+## How it maps to NetBird
 
 For each user group and port set, the reconciler maintains:
 
@@ -33,17 +166,19 @@ For each user group and port set, the reconciler maintains:
 | Policy | `gitops-<group>` | one one-way rule per port set: `<group>` -> `gitops-<group>-…` |
 | Network router | — | the routing peers of `network.routerGroup` |
 
-Rules are one way and always name their ports. Peers of different users never reach each
-other unless you declare it.
+**Ownership.**
+- netbird-gitops owns the objects prefixed `gitops-`, plus the declared network with its
+  resources and router.
+- It creates user groups and the router group if they are missing, and never deletes them.
+- It never touches peers, setup keys or tokens.
 
-**Ownership.** netbird-gitops owns objects prefixed `gitops-`, plus the declared network with its
-resources and router. User groups and the router group are created if missing, never deleted.
-It never touches peers, setup keys or tokens.
+**Strict mode** (default):
+- Every enabled policy that netbird-gitops does not own is *disabled*. It is never deleted, so
+  it can be re-enabled by hand.
+- Owned objects that are no longer declared are deleted.
 
-**strict mode** (default): every enabled policy not owned by netbird-gitops is *disabled* (never
-deleted, so it can be re-enabled by hand). Owned objects that are no longer declared are deleted.
-Without strict, unknown objects are kept and only reported. All -> All policies (NetBird's
-`Default` one) are disabled in both modes unless `disableAllToAll: false`.
+Without strict mode, unknown objects are kept and only reported. All -> All policies (such as
+NetBird's `Default` policy) are disabled in both modes, unless `disableAllToAll: false`.
 
 **Order.** Every run grants new access before it revokes anything:
 
@@ -54,48 +189,20 @@ Without strict, unknown objects are kept and only reported. All -> All policies 
 5. disabling and deleting old objects
 6. users
 
-Deletions are best effort: a failure is reported and the job fails, but the rest of the run is
-still applied.
+Deletions are best effort. If one fails, the job fails, but the rest of the run is still applied.
 
 **Users** (optional). With `users: null`, group membership stays in the console. In that mode the
-reconciler only sets console roles: `admin` for members of `adminsGroup`, `user` for the other
-user groups. Roles are left alone when `adminsGroup` is not set. With a `users` map, Git owns
-membership of the user groups:
+reconciler only sets console roles:
+- `admin` for members of `adminsGroup`;
+- `user` for members of the other user groups;
+- no change at all when `adminsGroup` is not set.
+
+With a `users` map, Git owns membership of the user groups:
 - Each listed e-mail gets exactly its groups.
 - Listed users pending approval are approved.
 - In strict mode, users who are not listed lose their user groups.
 - Groups outside `userGroups` (device groups, for example) are kept.
 - The owner's role and service users are never changed.
-
-## Quick start
-
-Requirements: NetBird with a **routing peer** whose setup key auto-assigns a group (the
-`routerGroup`), and a **personal access token of an admin service user**.
-
-```sh
-kubectl -n netbird create secret generic netbird-admin-pat --from-literal=token=<PAT>
-
-helm install netbird-gitops oci://ghcr.io/hatemmezlini/charts/netbird-gitops \
-  -n netbird -f my-values.yaml    # start from examples/values.yaml
-```
-
-The chart starts in **dry run**. Run the job once and read the plan:
-
-```sh
-kubectl -n netbird create job --from=cronjob/netbird-gitops netbird-gitops-plan
-kubectl -n netbird logs -f job/netbird-gitops-plan
-```
-
-When the plan is what you expect, set `reconciler.dryRun: false`. A failed Job means an API
-error, a deletion that could not be applied, or no routing peer connected.
-
-Run it outside Kubernetes:
-
-```sh
-pip install .
-NB_API_URL=https://netbird.example.com NB_TOKEN_FILE=./pat \
-  netbird-gitops --config config.json --dry-run
-```
 
 ## Configuration
 
@@ -149,12 +256,19 @@ tool from the device, and a card appears only when its tool answers:
 
 | Tool | Probe | Shown when |
 |---|---|---|
-| Web (`url`, or a domain on 443) | `no-cors` request to the URL | any HTTP answer, even an error page |
+| Web (`url`, or a domain on 443) | `HEAD` request to the URL | any HTTP answer, even an error page |
 | TCP, not web (e.g. `ports: [5432]`) | `https://<address>:<port>/` | any answer before the timeout, even a protocol error |
-| With `probe` | that URL | any HTTP answer |
+| With `probe` | `HEAD` request to that URL | any HTTP answer |
 
 A blocked tool only ever times out (`portal.checkTimeoutMs`, 4 s by default), so cards appear
-progressively and the last ones settle after the timeout. Browsers refuse some ports (22, 25,
+progressively and the last ones settle after the timeout.
+
+**When it checks.** The page checks when it opens, and again in three cases: when you come back
+to the tab (at most every 30 s), when the network comes back, and when you click *Check again*.
+It does not poll. A re-check updates the cards in place: newly granted tools appear, revoked
+ones disappear. The probes use `HEAD` requests, without cookies, and download no page content.
+This shows access, not health: a tool that is down behind a gateway still answers with an error,
+so its card stays. Health belongs in your monitoring. Browsers refuse some ports (22, 25,
 …); such tools, and `udp`, `icmp`, `all`, wildcard or CIDR tools, need `probe` or
 `portal: false`, and the chart says so when rendering.
 
